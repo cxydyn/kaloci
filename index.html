@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Password Generator & Manager</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- React & Babel CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Google Fonts (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom transition for password strength bar */
+        .strength-bar {
+            transition: width 0.3s ease-in-out, background-color 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // --- Main App Component ---
+        const App = () => {
+            const [passwords, setPasswords] = useState([]);
+            const [generatedPassword, setGeneratedPassword] = useState('');
+            const [passwordLength, setPasswordLength] = useState(16);
+            const [options, setOptions] = useState({
+                uppercase: true,
+                lowercase: true,
+                numbers: true,
+                symbols: true,
+            });
+            const [strength, setStrength] = useState({ score: 0, label: 'Very Weak', color: 'bg-red-500' });
+
+            // Load passwords from localStorage on initial render
+            useEffect(() => {
+                try {
+                    const storedPasswords = JSON.parse(localStorage.getItem('localPasswords') || '[]');
+                    setPasswords(storedPasswords);
+                } catch (error) {
+                    console.error("Failed to parse passwords from localStorage:", error);
+                    setPasswords([]);
+                }
+            }, []);
+
+            // Save passwords to localStorage whenever they change
+            useEffect(() => {
+                localStorage.setItem('localPasswords', JSON.stringify(passwords));
+            }, [passwords]);
+
+            const handleOptionChange = (option) => {
+                setOptions(prev => ({ ...prev, [option]: !prev[option] }));
+            };
+
+            const calculateStrength = useCallback(() => {
+                let score = 0;
+                if (passwordLength >= 8) score++;
+                if (passwordLength >= 12) score++;
+                if (passwordLength >= 16) score++;
+                if (options.uppercase && options.lowercase) score++;
+                if (options.numbers) score++;
+                if (options.symbols) score++;
+
+                let label = 'Very Weak';
+                let color = 'bg-red-600';
+                if (score > 1) { label = 'Weak'; color = 'bg-orange-500'; }
+                if (score > 3) { label = 'Medium'; color = 'bg-yellow-500'; }
+                if (score > 4) { label = 'Strong'; color = 'bg-green-500'; }
+                if (score > 5) { label = 'Very Strong'; color = 'bg-emerald-500'; }
+
+                setStrength({ score, label, color });
+            }, [passwordLength, options]);
+
+            useEffect(() => {
+                calculateStrength();
+            }, [passwordLength, options, calculateStrength]);
+
+            const generatePassword = () => {
+                const charSets = {
+                    uppercase: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                    lowercase: 'abcdefghijklmnopqrstuvwxyz',
+                    numbers: '0123456789',
+                    symbols: '!@#$%^&*()_+~`|}{[]:;?><,./-=',
+                };
+
+                let charset = '';
+                let guaranteedChars = '';
+                
+                for (const [key, value] of Object.entries(options)) {
+                    if (value) {
+                        charset += charSets[key];
+                        guaranteedChars += charSets[key][Math.floor(Math.random() * charSets[key].length)];
+                    }
+                }
+
+                if (charset === '') {
+                    // Using a modal or a less intrusive notification would be better in a real app
+                    // but alert is fine for this local tool.
+                    alert('Please select at least one character type.');
+                    setGeneratedPassword('');
+                    return;
+                }
+
+                let password = guaranteedChars;
+                for (let i = guaranteedChars.length; i < passwordLength; i++) {
+                    password += charset[Math.floor(Math.random() * charset.length)];
+                }
+
+                // Shuffle the password to mix guaranteed characters
+                const shuffledPassword = password.split('').sort(() => 0.5 - Math.random()).join('');
+                setGeneratedPassword(shuffledPassword);
+            };
+            
+            const addPassword = (entry) => {
+                setPasswords(prev => [...prev, { ...entry, id: Date.now() }]);
+            };
+
+            const deletePassword = (id) => {
+                // Not using confirm() for better UX, but it's a simple local tool.
+                if(window.confirm('Are you sure you want to delete this password?')) {
+                    setPasswords(prev => prev.filter(p => p.id !== id));
+                }
+            };
+            
+            const copyToClipboard = (text, callback) => {
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        callback();
+                    }).catch(err => {
+                        console.error('Failed to copy using clipboard API: ', err);
+                    });
+                } else {
+                    // Fallback for non-secure contexts (like file:// or http://)
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        callback();
+                    } catch (err) {
+                        console.error('Fallback copy failed: ', err);
+                    }
+                    document.body.removeChild(textArea);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
+                    <div className="w-full max-w-5xl mx-auto">
+                        <header className="text-center mb-10">
+                            <h1 className="text-4xl md:text-5xl font-extrabold text-white">Password Toolkit</h1>
+                            <p className="text-slate-400 mt-2">Generate and manage your passwords locally.</p>
+                        </header>
+
+                        <main className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            {/* Generator */}
+                            <Generator
+                                password={generatedPassword}
+                                length={passwordLength}
+                                setLength={setPasswordLength}
+                                options={options}
+                                onOptionChange={handleOptionChange}
+                                onGenerate={generatePassword}
+                                strength={strength}
+                                onSave={addPassword}
+                                copyToClipboard={copyToClipboard}
+                            />
+                            {/* Manager */}
+                            <Manager 
+                                passwords={passwords}
+                                onDelete={deletePassword}
+                                copyToClipboard={copyToClipboard}
+                            />
+                        </main>
+                         <footer className="text-center mt-10 text-slate-500 text-xs max-w-2xl mx-auto">
+                            <p className="font-bold text-yellow-400">⚠️ Important: This app saves data to your browser's localStorage. It is not encrypted and is not a substitute for a dedicated password manager like Bitwarden or 1Password.</p>
+                            <p className="mt-1">Data is stored locally and is never sent to any server.</p>
+                        </footer>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Generator Component ---
+        const Generator = ({ password, length, setLength, options, onOptionChange, onGenerate, strength, onSave, copyToClipboard }) => {
+            const [website, setWebsite] = useState('');
+            const [username, setUsername] = useState('');
+            const [copyText, setCopyText] = useState('Copy');
+
+            const handleSave = () => {
+                if (!website || !username || !password) {
+                    alert('Please fill in Website, Username, and generate a Password before saving.');
+                    return;
+                }
+                onSave({ website, username, password });
+                setWebsite('');
+                setUsername('');
+            };
+            
+            const handleCopy = () => {
+                if(!password) return;
+                copyToClipboard(password, () => {
+                    setCopyText('Copied!');
+                    setTimeout(() => setCopyText('Copy'), 2000);
+                });
+            };
+
+            return (
+                <div className="bg-slate-800 p-6 rounded-2xl shadow-lg">
+                    <h2 className="text-2xl font-bold mb-4">Password Generator</h2>
+                    
+                    {/* Display */}
+                    <div className="bg-slate-900 p-4 rounded-lg flex items-center justify-between mb-4">
+                        <span className="font-mono text-lg truncate pr-4">{password || 'P4$$w0rd...'}</span>
+                        <button onClick={handleCopy} className="text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 px-3 py-1 rounded-md transition-colors flex-shrink-0">{copyText}</button>
+                    </div>
+
+                    {/* Strength Indicator */}
+                    <div className="w-full bg-slate-700 rounded-full h-2.5 mb-1">
+                        <div className={`strength-bar h-2.5 rounded-full ${strength.color}`} style={{ width: `${(strength.score / 6) * 100}%` }}></div>
+                    </div>
+                    <p className="text-xs text-right text-slate-400 mb-4">Strength: <span className="font-semibold">{strength.label}</span></p>
+                    
+                    {/* Controls */}
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <label htmlFor="length">Password Length</label>
+                            <span className="font-bold text-lg">{length}</span>
+                        </div>
+                        <input id="length" type="range" min="6" max="32" value={length} onChange={(e) => setLength(e.target.value)} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"/>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {Object.keys(options).map(opt => (
+                                <div key={opt} className="flex items-center">
+                                    <input id={opt} type="checkbox" checked={options[opt]} onChange={() => onOptionChange(opt)} className="w-4 h-4 text-emerald-600 bg-gray-700 border-gray-600 rounded focus:ring-emerald-500"/>
+                                    <label htmlFor={opt} className="ml-2 text-sm font-medium capitalize">{opt}</label>
+                                </div>
+                            ))}
+                        </div>
+                        
+                        <button onClick={onGenerate} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition-colors">Generate Password</button>
+                    </div>
+
+                    {/* Save Section */}
+                    <div className="mt-6 pt-6 border-t border-slate-700">
+                        <h3 className="text-lg font-semibold mb-3">Save to Manager</h3>
+                        <div className="space-y-3">
+                            <input type="text" placeholder="Website (e.g., google.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"/>
+                            <input type="text" placeholder="Username / Email" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"/>
+                            <button onClick={handleSave} className="w-full bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 rounded-lg transition-colors">Save</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Manager Component ---
+        const Manager = ({ passwords, onDelete, copyToClipboard }) => {
+            const [copiedId, setCopiedId] = useState(null);
+            const [copiedType, setCopiedType] = useState(null);
+
+            const handleCopy = (text, id, type) => {
+                copyToClipboard(text, () => {
+                    setCopiedId(id);
+                    setCopiedType(type);
+                    setTimeout(() => {
+                        setCopiedId(null);
+                        setCopiedType(null);
+                    }, 2000);
+                });
+            };
+
+            return (
+                <div className="bg-slate-800 p-6 rounded-2xl shadow-lg">
+                    <h2 className="text-2xl font-bold mb-4">Password Manager</h2>
+                    <div className="h-[50vh] lg:h-[60vh] overflow-y-auto pr-2 space-y-3">
+                        {passwords.length === 0 ? (
+                            <div className="text-center text-slate-500 pt-16 flex flex-col items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-slate-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                                <p>No passwords saved yet.</p>
+                                <p className="text-sm">Use the generator to get started.</p>
+                            </div>
+                        ) : (
+                            passwords.map(p => (
+                                <div key={p.id} className="bg-slate-900 p-4 rounded-lg animate-fade-in">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <h4 className="font-bold text-white break-all">{p.website}</h4>
+                                            <p className="text-sm text-slate-400 break-all">{p.username}</p>
+                                        </div>
+                                        <button onClick={() => onDelete(p.id)} className="text-slate-500 hover:text-red-500 transition-colors flex-shrink-0 ml-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div className="mt-3 flex flex-col sm:flex-row sm:space-x-2 space-y-2 sm:space-y-0">
+                                        <button onClick={() => handleCopy(p.username, p.id, 'user')} className="flex-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-1.5 rounded-md transition-colors">
+                                            {copiedId === p.id && copiedType === 'user' ? 'Copied!' : 'Copy User'}
+                                        </button>
+                                        <button onClick={() => handleCopy(p.password, p.id, 'pass')} className="flex-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-1.5 rounded-md transition-colors">
+                                            {copiedId === p.id && copiedType === 'pass' ? 'Copied!' : 'Copy Pass'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+
+</body>
+</html>
